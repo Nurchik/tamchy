@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block content %}
+	{% if success %}
+		<p><strong>Tamchy-File successfully opened</strong></p>
+	{% else %}	
+		<form action="" method='POST' enctype="multipart/form-data">
+			<p><input type="file" name='stream_file' class="dropzone"></p>
+			<p><input type="submit" value="Open Stream"></p>
+		</form>
+	{% endif %}
+
+{% endblock %}
+
+{% block urls %}
+	<section class="section">
+	  <h5 class="title"><a href="{{ urls.index }}">Index</a></h5>
+	</section>
+	<section class="section">
+	  <h5 class="title"><a href="{{ urls.create_stream }}">Create Stream</a></h5>
+	</section>
+	<section class="section">
+	  <h5 class="title"><a href="{{ urls.list }}">List of Streams</a></h5>
+	</section>
+	<section class="section">
+	  <h5 class="title"><a href="#" onclick="exit('{{ urls.exit}}');">Exit</a></h5>
+	</section>
+{% endblock %}

@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1> {{ stream.name }} </h1>
+<p>Content ID : {{ stream.content_id }}</p>
+<p>Source : {{ stream.source }} </p>
+<p>Active Peers : {{ stream.connected_peers }} </p>
+<p><a href="{{ urls.list }}/{{stream.content_id}}/file">Tamchy-File</a></p>
+<p><a href="{{ urls.list }}/{{stream.content_id}}/watch">Watch Stream (via playlist)</a></p>
+<p><a href="{{ urls.list }}/{{stream.content_id}}/stream">Raw Stream</a></p>
+{% endblock %}
+{% block urls %}
+	<section class="section">
+	  <h5 class="title"><a href="{{ urls.index }}">Index</a></h5>
+	</section>
+	<section class="section">
+	  <h5 class="title"><a href="{{ urls.create_stream }}">Create Stream</a></h5>
+	</section>
+	<section class="section">
+	  <h5 class="title"><a href="{{ urls.open_stream }}">Open Stream</a></h5>
+	</section>
+	<section class="section">
+	  <h5 class="title"><a href="{{ urls.list }}">List of Streams</a></h5>
+	</section>
+	<section class="section">
+	  <h5 class="title"><a href="#" onclick="exit('{{ urls.exit}}');">Exit</a></h5>
+	</section>
+{% endblock %}

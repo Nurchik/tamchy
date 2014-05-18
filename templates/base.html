@@ -1,0 +1,79 @@
+<!doctype html>
+<html class="no-js" lang="en">
+  <head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>Tamchy System</title>
+	<link rel="stylesheet" href="/css/foundation.css" />
+  <link rel="stylesheet" href="/css/dropzone.css" />
+	<script src="/js/vendor/modernizr.js"></script>
+  <script src="/js/dropzone.min.js"></script>
+	<link rel="stylesheet" type="text/css" href="/css/component.css" />
+  </head>
+
+  <script type="text/javascript">
+  function exit(url){
+    var c = confirm('Are you sure want to exit program?');
+    if (c == true){
+      window.location.href = url;
+      }
+    }
+</script>
+
+  <body style="background-color:#ffffff;">
+      <!-- Header and Nav -->
+  <div class="row">
+    <div class="large-12 columns">
+      <div class="panel">
+        <h1>Tamchy</h1>
+      </div>
+    </div>
+  </div>
+  <!-- End Header and Nav -->
+  <div class="row">
+ <!-- Nav Sidebar -->
+    <!-- Main Feed -->
+    <!-- This has been source ordered to come first in the markup (and on small devices) but to be to the right of the nav on larger screens -->
+     <div class="large-3 columns ">
+      <div class="panel">
+          <div class="section-container vertical-nav" data-section data-options="deep_linking: false; one_up: true">
+
+          {% block urls %} {% endblock %}      
+
+          </div>
+      </div>
+     </div>
+
+    <div class="large-9 columns">
+       {% if errors %}
+          <li>
+            {% for error in errors %}
+              <ul>{{ error }}</ul>
+            {% endfor %}
+          </li>
+       {% endif %}
+       {% block content %} {% endblock %}
+    </div>
+ 
+  </div>
+ 
+ 
+  <!-- Footer -->
+ 
+  <footer class="row">
+    <div class="large-12 columns">
+      <hr />
+      <div class="row">
+        <div class="large-5 columns">
+          <p>© Copyright Tamchy System</p>
+        </div>
+      </div>
+    </div>
+  </footer>
+        <script src="js/vendor/jquery.js"></script>
+        <script src="js/foundation.min.js"></script>
+        <script>
+          $(document).foundation();
+        </script>
+  </body>
+</html>

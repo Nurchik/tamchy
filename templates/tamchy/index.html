@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Тамчы системасы</h1>
+	<div class="row">
+    	<aside class="large-9 columns">
+    	  	<a href="{{ urls.open_stream }}"><img src="/images/OpenStream.gif" /></a><br>
+    	  	<br>
+			<a href="{{ urls.create_stream }}"><img src="/images/CreateStream.gif" /></a>
+    	</aside>
+{% endblock %}
+{% block urls %}
+	<section class="section">
+	  <h5 class="title"><a href="{{ urls.create_stream }}">Create Stream</a></h5>
+	</section>
+	<section class="section">
+	  <h5 class="title"><a href="{{ urls.open_stream }}">Open Stream</a></h5>
+	</section>
+	<section class="section">
+	  <h5 class="title"><a href="{{ urls.list }}">List of Streams</a></h5>
+	</section>
+	<section class="section">
+	  <h5 class="title"><a href="#" onclick="exit('{{ urls.exit}}');">Exit</a></h5>
+	</section>
+{% endblock %}
+ 

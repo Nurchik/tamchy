@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block content %}
+	{% if success %}
+		<h4><strong>New stream successfully created</strong></h4>	
+	{% else %}
+		<form action="" method='POST' enctype="multipart/form-data">
+			
+			<div class="row">
+				<div class="medium-6 columns">
+					<label> Name
+						<input type="text" name="name"></p>
+					</label>
+				</div>
+				<div class="medium-5 columns">
+					Type the name of the stream which will be created
+				</div>
+			</div><br>
+		
+			<div class="row">
+				<div class="medium-6 columns">
+					<label> Source
+						<input type="text" name="source">
+					</label>
+				</div>
+				<div class="medium-5 columns">
+					<p>Type the url of the input video stream which you want to stream
+					For now it's only support HTTP video source ( </p>
+				</div>
+			</div><br>
+			
+			<div class="row">
+				<div class="medium-6 columns">
+					<label> Content ID
+						<input type="text" name="content_id">
+					</label>
+				</div>
+				<div class="medium-5 columns">
+					<p>Write Content ID manually if you have had stream and you want to restart it.
+					If you doesn't have Content ID just left <strong>blank</strong>. It will be generated 			automatically.</p>
+				</div>
+			</div><br>
+			
+			<div class="row">
+				<div class="medium-6 columns">
+					<label> Port
+						<input type="text" name="port" value="7889">
+					</label>
+				</div>
+				<div class="medium-5 columns">
+					<p>Type port on which the program will accept incoming connections.</p>
+				</div>
+			</div><br>
+			
+			<div class="row">
+				<div class="medium-6 columns">
+						<input type="submit" value="Create Stream">
+				</div>
+			</div><br>
+		</form>
+	{% endif %}
+
+{% endblock %}
+
+{% block urls %}
+	<section class="section">
+	  <h5 class="title"><a href="{{ urls.index }}">Index</a></h5>
+	</section>
+	<section class="section">
+	  <h5 class="title"><a href="{{ urls.open_stream }}">Open Stream</a></h5>
+	</section>
+	<section class="section">
+	  <h5 class="title"><a href="{{ urls.list }}">List of Streams</a></h5>
+	</section>
+	<section class="section">
+	  <h5 class="title"><a href="#" onclick="exit('{{ urls.exit}}');">Exit</a></h5>
+	</section>
+{% endblock %}

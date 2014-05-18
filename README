@@ -1,0 +1,20 @@
+Tamchy
+
+version : 0.1-beta
+
+This program is written entirely in pure-python.
+You can start streaming a video from any source you want and other users will be able to watch your stream.
+
+After you have opened stream, you can visit http://localhost:8001/ (default) and see all the active streams
+and start watching any from that list.
+
+Usage
+Type in command line:
+	python Client.py
+or
+	./ Client.py
+
+LICENSE
+This program is distributed under MIT License.
+
+CONTRIBUTE
