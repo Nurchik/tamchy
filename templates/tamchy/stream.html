@@ -5,24 +5,25 @@
 <p>Content ID : {{ stream.content_id }}</p>
 <p>Source : {{ stream.source }} </p>
 <p>Active Peers : {{ stream.connected_peers }} </p>
-<p><a href="{{ urls.list }}/{{stream.content_id}}/file">Tamchy-File</a></p>
-<p><a href="{{ urls.list }}/{{stream.content_id}}/watch">Watch Stream (via playlist)</a></p>
-<p><a href="{{ urls.list }}/{{stream.content_id}}/stream">Raw Stream</a></p>
+<p><a href="/file/{{stream.content_id}}?fmt=tamchy">Tamchy-File</a></p>
+<p><a href="/file/{{stream.content_id}}?fmt=playlist">Watch Stream (via playlist)</a></p>
+<p><a href="/stream/{{stream.content_id}}">Raw Stream</a></p>
+<p><a href="/delete/{{stream.content_id}}">Delete Stream</a></p>
 {% endblock %}
 {% block urls %}
 	<section class="section">
-	  <h5 class="title"><a href="{{ urls.index }}">Index</a></h5>
+	  <h5 class="title"><a href="/index">Index</a></h5>
 	</section>
 	<section class="section">
-	  <h5 class="title"><a href="{{ urls.create_stream }}">Create Stream</a></h5>
+	  <h5 class="title"><a href="/create_stream">Create Stream</a></h5>
 	</section>
 	<section class="section">
-	  <h5 class="title"><a href="{{ urls.open_stream }}">Open Stream</a></h5>
+	  <h5 class="title"><a href="/open_stream">Open Stream</a></h5>
 	</section>
 	<section class="section">
-	  <h5 class="title"><a href="{{ urls.list }}">List of Streams</a></h5>
+	  <h5 class="title"><a href="/streams">List of Streams</a></h5>
 	</section>
 	<section class="section">
-	  <h5 class="title"><a href="#" onclick="exit('{{ urls.exit}}');">Exit</a></h5>
+	  <h5 class="title"><a href="#" onclick="exit('/exit');">Exit</a></h5>
 	</section>
 {% endblock %}

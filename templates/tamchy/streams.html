@@ -8,15 +8,15 @@
 
 {% block urls %}
 	<section class="section">
-	  <h5 class="title"><a href="{{ urls.index }}">Index</a></h5>
+	  <h5 class="title"><a href="/index">Index</a></h5>
 	</section>
 	<section class="section">
-	  <h5 class="title"><a href="{{ urls.create_stream }}">Create Stream</a></h5>
+	  <h5 class="title"><a href="/create_stream">Create Stream</a></h5>
 	</section>
 	<section class="section">
-	  <h5 class="title"><a href="{{ urls.open_stream }}">Open Stream</a></h5>
+	  <h5 class="title"><a href="/open_stream">Open Stream</a></h5>
 	</section>
 	<section class="section">
-	  <h5 class="title"><a href="#" onclick="exit('{{ urls.exit}}');">Exit</a></h5>
+	  <h5 class="title"><a href="#" onclick="exit('/exit');">Exit</a></h5>
 	</section>
 {% endblock %}

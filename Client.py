@@ -1,3 +1,4 @@
+# -*- coding:utf-8 -*-
 import multiprocessing,io,pickle,sqlite3,socket,logging,sys,os
 import messages
 from StringIO import StringIO
@@ -80,7 +81,7 @@ class Client:
 		#except:
 		#	self.logger.error('Cannot obtain external url')
 		#	raise Exception("Cannot check url")
-		self.ip = '192.168.31.3'
+		self.ip = '127.0.0.1'
 		#self.http_server = HTTPServer(7668,self)
 		# 'port':Server instance
 		self.ports = {}
@@ -187,7 +188,7 @@ class Client:
 		cherrypy.config.update({'server.socket_host': '127.0.0.1','server.socket_port': HTTP_PORT,'environment': 'production'})
 		cherrypy.tree.mount(self,'/',config=STATIC_CONFIG)
 
-		self.urls = self.create_urls_tree()
+		#self.urls = self.create_urls_tree()
 
 		cherrypy.engine.start()
 
@@ -199,88 +200,101 @@ class Client:
 	@cherrypy.expose
 	def index(self):
 		tmpl = self.env.get_template('tamchy/index.html')
-		return tmpl.render(urls=self.urls,errors=[])
+		return tmpl.render(errors=[])
 
 	@cherrypy.expose
-	def streams(self,id=None,action=None):
+	def streams(self,id=None):
 		tmpl = self.env.get_template('tamchy/streams.html')
 		if id is None:
-			return tmpl.render(streams=self.get_list_of_streams(),urls=self.urls,errors=[])
+			return tmpl.render(streams=self.get_list_of_streams(),errors=[])
 		
 		stream = self._streams.get(id,None)
 		if stream is None:
 			raise cherrypy.HTTPError(404,'No matching stream')
 		
-		if action is None:
-			tmpl = self.env.get_template('tamchy/stream.html')
-			return tmpl.render(stream=stream,urls=self.urls,errors=[])
-
-		if action == 'file':
-			return serve_fileobj(stream.get_file(), "application/x-download", disposition='attachment',name=stream.name + '.tamchy')
-
-		if action == 'watch':
-			playlist = '''#EXTM3U\n#EXTINF:-1, {0}\n{1}'''.format(stream.name,self.urls['list'] + '/' + id + '/stream')
-			return serve_fileobj(StringIO(playlist), "application/x-download", disposition='attachment',name=stream.name + '.m3u')
-
-		elif action == 'stream':
-			cherrypy.response.headers['Content-Type'] = 'application/octet-stream'
-			cherrypy.response.stream = True
-	
-			stream = self.get_stream(id,BUFFERING_SECONDS)
-			
-			while True:
-				# this is http video stream
-				return stream
+		tmpl = self.env.get_template('tamchy/stream.html')
+		return tmpl.render(stream=stream,errors=[])
 
 	@cherrypy.expose
 	def open_stream(self,stream_file=None):
 		tmpl = self.env.get_template('tamchy/open_stream.html')
 		if cherrypy.request.method == 'GET':
-			return tmpl.render(errors=[],success=False,urls=self.urls)
+			return tmpl.render(errors=[],success=False)
 		# POST
 		else:
 			if stream_file is not None:
 				# checking extension of a file
 				if stream_file.filename.split('.')[-1] != 'tamchy':
-					return tmpl.render(errors=['Unknown type of the file. Please check the extension'],success=False,urls=self.urls)
+					return tmpl.render(errors=['Unknown type of the file. Please check the extension'],success=False)
 				try:
 					self._open_stream(stream_file.file)
 				except Exception as e:
-					return tmpl.render(errors=[e.message],success=False,urls=self.urls)
-				return tmpl.render(errors=[],success=True,urls=self.urls)
+					return tmpl.render(errors=[e.message],success=False)
+				return tmpl.render(errors=[],success=True)
 			else:
-				return tmpl.render(errors=['Please select tamchy-file'],success=False,urls=self.urls)
+				return tmpl.render(errors=['Please select tamchy-file'],success=False)
 
 	@cherrypy.expose
 	def create_stream(self,name=None,source=None,content_id=None,port=7889):
 		tmpl = self.env.get_template('tamchy/create_stream.html')
 		if cherrypy.request.method == 'GET':
-			return tmpl.render(errors=[],success=False,urls=self.urls)
+			return tmpl.render(errors=[],success=False)
 		
 		else:
 			# form-filling check!
 			for arg in (name,source):
 				if not arg:
-					return tmpl.render(errors=['Please fill all of the fields'],success=False,urls=self.urls)
+					return tmpl.render(errors=['Please fill all of the fields'],success=False)
 
 			try:
 				self._create_stream(name,source,content_id,int(port))
 			except Exception as e:
-				return tmpl.render(errors=[e.message],success=False,urls=self.urls)
-			return tmpl.render(errors=[],success=True,urls=self.urls)	
+				return tmpl.render(errors=[e.message],success=False)
+			return tmpl.render(errors=[],success=True)	
 
 	@cherrypy.expose
 	def exit(self):
 		self.work = False
 		return 'Goodbye!'
 
-# this method is useful to give absolute url to methods of CherryPy	
-# Smells like a Django's {% url %} in templates  :)
-#def reverse(cls):
-#	for app_url in cherrypy.tree.apps.keys():
-#	    if isinstance(cherrypy.tree.apps[app_url].root, cls):
-#	        # NOTE: it will return with the first instance
-#	        return app_url
+	@cherrypy.expose
+	def delete(self,id):
+		container = self._streams.get(id,None)
+		if container is None:
+			raise cherrypy.HTTPError(404,'No matching stream')
+		server = container.R.server
+		server.unregister_stream(container)
+		del self._streams[container.content_id]
+		container.close()
+		return 'Successfully deleted!'
+
+	@cherrypy.expose
+	def file(self,id=None,fmt='tamchy'):
+		tmpl = self.env.get_template('tamchy/streams.html')
+		
+		stream = self._streams.get(id,None)
+		if stream is None:
+			raise cherrypy.HTTPError(404,'No matching stream')
+
+		if fmt == 'tamchy':
+			return serve_fileobj(stream.get_file(), "application/x-download", disposition='attachment',name=stream.name + '.tamchy')
+
+		if fmt == 'playlist':
+			playlist = '''#EXTM3U\n#EXTINF:-1, {0}\n{1}'''.format(stream.name,'http://127.0.0.1:' + str(HTTP_PORT) + '/stream/' + id)
+			return serve_fileobj(StringIO(playlist), "application/x-download", disposition='attachment',name=stream.name + '.m3u')
+
+	@cherrypy.expose
+	def stream(self,id):
+		cherrypy.response.headers['Content-Type'] = 'application/octet-stream'
+		cherrypy.response.stream = True
+
+		if id not in self._streams:
+			raise cherrypy.HTTPError(404,'No matching stream')
+
+		stream = self.get_stream(id,BUFFERING_SECONDS)
+		while True:
+			# this is http video stream
+			return stream
 #
 	# -*-*-*-*-*-*-*-*-*-*-*-*-* CherryPy HTTP methods -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-
 
