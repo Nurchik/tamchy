@@ -38,7 +38,7 @@ HTTP_PORT = 8001
 class grenade:
 	def __init__(self,Client):
 		self.C = Client
-		self.logger = logging.getLogger('GRENADE')
+		self.logger = logging.getLogger('tamchy.GRENADE')
 
 	def pull(self,error,container):
 		server = container.R.server
@@ -47,7 +47,7 @@ class grenade:
 
 		del self.C._streams[container.content_id]
 
-		self.logger.error('FATAL ERROR --> '  + error)
+		self.logger.error(error)
 
 class Client:
 	def __init__(self,buffering_units=3,debug=False):
@@ -89,6 +89,7 @@ class Client:
 		self.urls = {}
 		if not debug:
 			self.start_http_server()
+		self.grenade = grenade(self)
 
 	def create_urls_tree(self):
 		urls = {}
@@ -131,9 +132,7 @@ class Client:
 			server = Server(port)
 			self.ports[port] = server
 
-		g = grenade(self)
-
-		s = StreamContainer(g,payload,self.peer_id,port,server.Reactor,source=source,is_server=True,ext_ip=self.ip)
+		s = StreamContainer(self.grenade,payload,self.peer_id,port,server.Reactor,source=source,is_server=True,ext_ip=self.ip)
 		self._streams[content_id] = s
 		server.register_stream(s)
 		
@@ -156,10 +155,8 @@ class Client:
 		if not server:
 			server = Server(port)
 			self.ports[port] = server
-
-		g = grenade(self)
 		
-		s = StreamContainer(g,info,self.peer_id,port,server.Reactor,ext_ip=self.ip)
+		s = StreamContainer(self.grenade,info,self.peer_id,port,server.Reactor,ext_ip=self.ip)
 		self._streams[info['content_id']] = s
 		server.register_stream(s)
 
@@ -262,10 +259,7 @@ class Client:
 		container = self._streams.get(id,None)
 		if container is None:
 			raise cherrypy.HTTPError(404,'No matching stream')
-		server = container.R.server
-		server.unregister_stream(container)
-		del self._streams[container.content_id]
-		container.close()
+		self.grenade.pull('User deleted Stream',container)
 		return 'Successfully deleted!'
 
 	@cherrypy.expose

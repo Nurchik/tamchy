@@ -20,7 +20,7 @@ DEFAULT_BUFFERING_SIZE = 128 * 1024
 WRITE_WAIT_TIMEOUT = 15.0
 READ_WAIT_TIMEOUT = 15.0
 STREAM_PIECE_SIZE = 16384
-COUNTER = 2 ** 16
+COUNTER = (2 ** 16) - 1
 
 def hex(t):
 	return pack('!I',t)
@@ -178,25 +178,30 @@ class StreamContainer(threading.Thread):
 			# and it's quite enough time to work until we drop the counter => after 2 ** 16 seconds 
 			# we must restart count from 0 again
 			self.logger.info('Started main loop')
+			# This is done to be able to watch http-stream in server machine
+			# maybe it's not necessary but will be good )
+			self.B.inited = True
+			i = 0
 			while self.work:
-				for i in xrange(COUNTER):
-					t = time()
-					d = ''
-					while (time() - t) < 1:
-						try : 
-							d += source.read(1024)
-						except :
-							self.grenade.pull('Cannot fetch data from source, COUNTER --> ' + str(i),self)
-							#raise Exception
-					# why len(d) + 4 ? Because we must to take into account 4 bytes of length
-					# and if we didn't do that, everytime a piece transferred, trailing 4 bytes of data 
-					# will not be recieved by peer
-					d = pack('!I',len(d) + 4) + d
-					# This is done to be able to watch http-stream in server machine
-					# maybe it's not necessary but will be good )
-					self.B.inited = True
-					self.B.put(i,d)
-					self.pos = i		
+				t = time()
+				d = ''
+				while (time() - t) < 1:
+					try : 
+						d += source.read(1024)
+					except :
+						self.grenade.pull('Cannot fetch data from source, COUNTER --> ' + str(i),self)
+						#raise Exception
+				# why len(d) + 4 ? Because we must to take into account 4 bytes of length
+				# and if we didn't do that, everytime a piece transferred, trailing 4 bytes of data 
+				# will not be recieved by peer
+				d = pack('!I',len(d) + 4) + d				
+				self.B.put(i,d)
+				self.pos = i
+				# i.e. 65535
+				if i == COUNTER:
+					i = 0
+				else:
+					i += 1
 		else:
 			if self.connect_server(self.info['ip'],self.info['port']):
 				requests = self.requests
@@ -257,6 +262,8 @@ class StreamContainer(threading.Thread):
 
 			else:
 				self.grenade.pull('Cannot connect to server',self)
+
+		self.logger.debug('Main loop stopped')
 
 	def return_reqs(self,reqs):
 		self.requests.extend(reqs)
