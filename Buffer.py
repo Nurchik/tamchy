@@ -122,7 +122,11 @@ class DBStorage:
 		return item in self.positions
 
 	def close(self):
-		pass
+		# delete our temp-file
+		try:
+			os.remove(self.c_id)
+		except:
+			pass
 
 class StreamBuffer:
 	def __init__(self,Container,grenade):

@@ -256,16 +256,15 @@ class Client:
 
 	@cherrypy.expose
 	def delete(self,id):
+		tmpl = self.env.get_template('tamchy/delete.html')
 		container = self._streams.get(id,None)
 		if container is None:
 			raise cherrypy.HTTPError(404,'No matching stream')
 		self.grenade.pull('User deleted Stream',container)
-		return 'Successfully deleted!'
+		return tmpl.render(errors=[])
 
 	@cherrypy.expose
-	def file(self,id=None,fmt='tamchy'):
-		tmpl = self.env.get_template('tamchy/streams.html')
-		
+	def file(self,id=None,fmt='tamchy'):		
 		stream = self._streams.get(id,None)
 		if stream is None:
 			raise cherrypy.HTTPError(404,'No matching stream')
