@@ -53,7 +53,7 @@ class Reactor(threading.Thread):
 				peer.handle_write()
 			for peer in e:
 				peer.handle_close()
-
+		
 	def close(self):
 		self.work = False
 		self.logger.info('Reactor terminated')

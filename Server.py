@@ -47,7 +47,7 @@ class TempPeer:
 		if len(length) < 4:
 			# this is not entire message => wait for remaining part
 			return 
-		length = struct.unpack('!I',self.read_buffer[:4])[0]
+		length = struct.unpack('!I',length[:4])[0]
 		if length > 32*1024:
 			return self.handle_close()
 		msg = self.read_buffer[4:4 + length]
@@ -87,18 +87,8 @@ class TempPeer:
 		self.Server.remove(self)
 
 class Server:
-	def __init__(self,Container,port=6590):
-		self.logger = logging.getLogger('tamchy.Server')
-		sock = socket.socket()
-		sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-		sock.bind(('',port))
-		sock.setblocking(0)
-		sock.listen(5)
-		self.socket = sock
-		self.work = True
-		self.C = Container
-		self.raw_ip = 'SERVER'
-		self.logger.info('Server on port ' + str(port) + ' started')
+	def __init__(self):
+		pass
 
 	def fileno(self):
 		return self.socket.fileno()
@@ -117,28 +107,24 @@ class Server:
 		length = struct.pack('!I',len(id+data))
 		return length+id+data
 
-	#def register(self,container):
-	#	pass
-#
-	#def unregister(self,container):
-	#	pass
+	def close(self):
+		self.Reactor.close()
+		self.socket.close()
 
+		
 class MultiServer(Server):
 	def __init__(self,port,debug=False):
 		self.logger = logging.getLogger('tamchy.Server')
-		
-		self.socket = sock
-		
+		# !!! self.socket = sock
 		self.Reactor = Reactor(self)
-		if not debug:
-			self.Reactor.start()
-
 		self.work = True
 		self.raw_ip = 'SERVER'
-		# 'content_id':StreamContainer instance
-		self.streams = {}
+		self.raw_port = port
 		if not debug:
 			self.socket = self.create_socket(port)
+			self.Reactor.start()
+		# 'content_id':StreamContainer instance
+		self.streams = {}
 
 		self.logger.info('Server on port ' + str(port) + ' started')
 
@@ -166,10 +152,13 @@ class MultiServer(Server):
 	def accept(self,sock,ip,port,content_id,buf,peer):
 		C = self.streams[content_id]
 		if C.can_add_peer():
-			self.Reactor.remove(peer)
+			self.remove(peer)
 			C.prepare_peer(ip=ip,port=port,sock=sock,buf=buf)
 		else:
 			peer.handle_close()
+
+	def add(self,peer):
+		self.Reactor.add(peer)
 
 	def remove(self,peer):
 		self.Reactor.remove(peer)

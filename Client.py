@@ -38,15 +38,27 @@ HTTP_PORT = 8001
 class grenade:
 	def __init__(self,Client):
 		self.C = Client
+		self.pulled = False
 		self.logger = logging.getLogger('tamchy.GRENADE')
+		self.error = ''
 
 	def pull(self,error,container):
-		server = container.R.server
+		server = container.Server
 		server.unregister_stream(container)
 		container.close()
+		self.pulled = True
+		# maybe container is not created
+		try:
+			del self.C._streams[container.content_id]
+		except:
+			pass
 
-		del self.C._streams[container.content_id]
+		# if there are no more StreamContainers
+		if not server.streams:
+			server.close()
+			del self.C.ports[server.raw_port]
 
+		self.error = error
 		self.logger.error(error)
 
 class Client:
@@ -104,41 +116,45 @@ class Client:
 
 		return urls
 
-	def _create_stream(self,name,source,content_id=None,bitrate=0,port=7889,nodes=[]):
+	def validate(self,c_id):
+		if len(c_id) == 32:
+			return True
+		return False
+
+	def _create_stream(self,name,source,content_id='',bitrate=0,port=7889,nodes=[]):
 		'''
 		content_id, ip,port (additional ip,port -> [(ip1,port1),(ip2,port2)])
 		'''
 		payload = {}
-		content_id = (content_id if content_id else generate_c_id())
+		content_id = (content_id if self.validate(content_id) else generate_c_id())
 		payload['name'] = name
 		payload['content_id'] = content_id
 		payload['ip'] = self.ip
 		payload['port'] = port
 		payload['nodes'] = nodes
-		#try:
-		#	with open(filename + '.tamchy','wb') as file:	
-		#		# path + content_id + '.tamchy'
-		#		#dump(payload, file)
-		#		dump(payload, file)
-		#	#self.logger.debug('Created tamchy file (' + (content_id + '.tamchy') + ') ' + 'at ' + path)
-		#	self.logger.debug('Created tamchy file (' + filename + '.tamchy' + ')')
-		#except:
-		#	#self.logger.error('Cannot create tamchy file (' + (content_id + '.tamchy') + ' ) ' + 'at ' + path)
-		#	self.logger.error('Cannot create tamchy file (' + filename + '.tamchy' + ' )')
-		#	raise Exception('Cannot create tamchy file')
 		
 		server = self.ports.get(port,'')
 		if not server:
-			server = Server(port)
+			try:
+				server = Server(port)
+			# we cannot create socket on given port
+			except:
+				raise Exception('Cannot Create Server on given port. Give another port')
 			self.ports[port] = server
 
-		s = StreamContainer(self.grenade,payload,self.peer_id,port,server.Reactor,source=source,is_server=True,ext_ip=self.ip)
-		self._streams[content_id] = s
-		server.register_stream(s)
-		
-		self.logger.debug('New StreamContainer (' + content_id + ') added to streams')
-		s.start()
+		s = StreamContainer(self.grenade,payload,self.peer_id,port,server,source=source,is_server=True,ext_ip=self.ip)
+		# if source is None => something went wrong with connection to source
+		# and grenade was pulled
+		if not self.grenade.pulled:
+			self._streams[content_id] = s
+			
+			server.register_stream(s)
 
+			self.logger.debug('New StreamContainer (' + content_id + ') added to streams')
+			#s.start()
+		else:
+			raise Exception(self.grenade.error)
+	
 	def _open_stream(self,file,port=7889):
 		#try:
 		#	file = open(file,'rb')
@@ -153,15 +169,23 @@ class Client:
 		
 		server = self.ports.get(port,'')
 		if not server:
-			server = Server(port)
+			try:
+				server = Server(port)
+			# we cannot create socket on given port
+			except:
+				raise Exception('Cannot Create Server on given port. Give another port')
 			self.ports[port] = server
 		
-		s = StreamContainer(self.grenade,info,self.peer_id,port,server.Reactor,ext_ip=self.ip)
-		self._streams[info['content_id']] = s
-		server.register_stream(s)
-
-		self.logger.debug('New StreamContainer (' + info['content_id'] + ') added to streams')
-		s.start()
+		s = StreamContainer(self.grenade,info,self.peer_id,port,server,ext_ip=self.ip)
+		if not self.grenade.pulled:
+			self._streams[info['content_id']] = s
+			
+			server.register_stream(s)
+	
+			self.logger.debug('New StreamContainer (' + info['content_id'] + ') added to streams')
+			#s.start()
+		else:
+			raise Exception(self.grenade.error)
 
 	def close(self):
 		for i in self._streams.values():
@@ -182,6 +206,7 @@ class Client:
 		return d
 
 	def start_http_server(self):
+		#cherrypy.config.update({'server.socket_host': '127.0.0.1','server.socket_port': HTTP_PORT})
 		cherrypy.config.update({'server.socket_host': '127.0.0.1','server.socket_port': HTTP_PORT,'environment': 'production'})
 		cherrypy.tree.mount(self,'/',config=STATIC_CONFIG)
 
@@ -232,7 +257,7 @@ class Client:
 				return tmpl.render(errors=['Please select tamchy-file'],success=False)
 
 	@cherrypy.expose
-	def create_stream(self,name=None,source=None,content_id=None,port=7889):
+	def create_stream(self,name=None,source=None,content_id='',port=7889):
 		tmpl = self.env.get_template('tamchy/create_stream.html')
 		if cherrypy.request.method == 'GET':
 			return tmpl.render(errors=[],success=False)
@@ -295,17 +320,57 @@ class Client:
 def generate_c_id(length=32):
 	return ''.join([choice(al + digits) for i in xrange(length)])
 
+# ---------------------------------------- Testing ----------------------------------------------------
+class SC:
+	def __init__(self,grenade,payload,peer_id,port,Reactor,source,is_server,ext_ip):
+		self.content_id = 'content_id'
+		if payload['name'] == 'success':
+			grenade.pulled =  False
+		else:
+			grenade.pulled = True
 
-#if __name__ == '__main__':
-#	c = Client()
-#	c.start_stream()
-#	c.open_stream()
-#	work = True
-#	while work:
-#		try: pass
-#		except KeyboardInterrupt:
-#			work = False
-#			c.close()#
+def test():
+	# this is a little hack to replace imported StreamContainer with another class to make tests
+	global StreamContainer
+	StreamContainer = SC
+	
+	c = Client(debug=True)
+	assert not c.ports
+	assert not c._streams
+	c._create_stream('success','source')
+	assert c._streams
+	assert len(c.ports) == 1
+	c._create_stream('success','source1')
+	assert len(c._streams) == 2
+	assert len(c.ports) == 1
+	c._create_stream('success','source2')
+	assert len(c._streams) == 3
+	assert len(c.ports) == 1
+	c._create_stream('success','source3',port=5463)
+	assert len(c._streams) == 4
+	assert len(c.ports) == 2
+	try:
+		c._create_stream('fail','source3',port=5463)
+	except:
+		pass
+	assert len(c._streams) == 4
+	assert len(c.ports) == 2
+	try:
+		c._create_stream('fail','source3',port=5465)
+	except:
+		pass
+	assert len(c._streams) == 4
+	assert len(c.ports) == 3
+	err = False
+	try:
+		c._create_stream('success','source3',port=5465435345)
+	except:
+		err = True
+	assert len(c._streams) == 4
+	assert len(c.ports) == 3
+	assert err
+# -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-* Testing -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-
+
 if __name__ == '__main__':
 	c = Client()
 	while c.work:

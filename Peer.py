@@ -257,7 +257,7 @@ class Peer:
 				break
 
 			self.read_buffer = self.read_buffer[4 + length:]
-			
+			# this part of this function will be used in Container.connect_server() -> otherwise it will not be used
 			if not self.handshaked:
 				if (msg[:12]).lower() == 'salamatsyzby':
 					if msg[12:44] == self.content_id:

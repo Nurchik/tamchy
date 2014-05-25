@@ -38,7 +38,23 @@
       <div class="panel">
           <div class="section-container vertical-nav" data-section data-options="deep_linking: false; one_up: true">
 
-          {% block urls %} {% endblock %}      
+          {% block urls %}
+            <section class="section">
+              <h5 class="title"><a href="/index">Home Page</a></h5>
+            </section>
+            <section class="section">
+              <h5 class="title"><a href="/open_stream">Open Stream</a></h5>
+            </section>
+            <section class="section">
+              <h5 class="title"><a href="/create_stream">Create Stream</a></h5>
+            </section>
+            <section class="section">
+              <h5 class="title"><a href="/streams">List of Streams</a></h5>
+            </section>
+            <section class="section">
+              <h5 class="title"><a href="#" onclick="exit('/exit');">Exit</a></h5>
+
+          {% endblock %}      
 
           </div>
       </div>

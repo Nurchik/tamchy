@@ -153,7 +153,10 @@ class StreamBuffer:
 			t1 = min(self.buffer.keys())
 			d = self.buffer.pop(t1)
 			self._put(t1,d)
-		self.buffer[t] = data
+		try:
+			self.buffer[t] = data
+		except:
+			pass
 		self.pos = t
 
 	def get(self,t):

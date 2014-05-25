@@ -15,6 +15,7 @@ import messages
 from time import time,sleep
 from struct import pack,unpack
 from StringIO import StringIO
+import Input
 
 DEFAULT_BUFFERING_SIZE = 128 * 1024
 WRITE_WAIT_TIMEOUT = 15.0
@@ -33,10 +34,10 @@ def num(t):
 :source is a http source for video to stream
 '''
 
-class StreamContainer(threading.Thread):
-	def __init__(self,grenade,info,peer_id,port,Reactor,max_connections=50,is_server=False,source='',bitrate=0,ext_ip=''):
+class StreamContainer:
+	def __init__(self,grenade,info,peer_id,port,Server,max_connections=50,is_server=False,source='',bitrate=0,ext_ip='',debug=False):
 		self.logger = logging.getLogger('tamchy.StreamContainer')
-		threading.Thread.__init__(self)
+		#threading.Thread.__init__(self)
 		self.daemon = True
 		self.info = info
 		self.grenade = grenade
@@ -45,12 +46,11 @@ class StreamContainer(threading.Thread):
 		self.peer_id = peer_id
 		self.port = port
 		self.is_server = is_server
-		self.source = source
 		self.bitrate = bitrate
 		self.content_id = info['content_id']
 		self.handshake = messages.construct_handshake(self.content_id,peer_id,port)
 		self.lock = threading.Lock()
-		self.R = Reactor
+		self.Server = Server
 		self.B = StreamBuffer(self,grenade)
 		self.work = True
 		self.connected_peers = 0
@@ -62,6 +62,12 @@ class StreamContainer(threading.Thread):
 		self.logger.debug('StreamContainer (' + self.content_id + ') created')
 		# after receiving peers list, connection with server will be used in requesting stream
 		# but program will not send any statistics to the server any more
+
+		# this is source's initialisation -> we should check if it works
+		self.source = self.select_for(source)
+		if not is_server and not debug:
+			if not self.connect_server(info['ip'],info['port']):
+				self.grenade.pull('Cannot Connect to Server',self)
 
 	def connect_server(self,ip,port):
 		s = Peer(self.content_id,self.handshake,\
@@ -90,6 +96,19 @@ class StreamContainer(threading.Thread):
 		self.logger.error('Cannot connect to the server')
 		return False
 
+	def select_for(self,source):
+		s = source.split(':')[0]
+		if s == 'http':
+			i = Input.HTTPInput(source)
+			if i.con == None:
+				self.grenade.pull('Cannot connect to source',self)
+				return 
+			# we must close connection to source until we need it later to prevent source's buffer overflow
+			i.con.close()
+			return i
+		else:
+			self.grenade.pull('Cannot Recognize Input source',self)
+
 	def prepare_peers(self,peers):
 		for i in xrange(len(peers)/6):
 			raw = peers[0+i*6:6+i*6]
@@ -114,16 +133,27 @@ class StreamContainer(threading.Thread):
 		return StringIO(pickle.dumps(self.info))
 
 	def add(self,peer):
+		# if it's first peer's connection -> start working
+		if not self.peers:
+			self.work = True
+			thr = threading.Thread(target=self.run,daemon=True)
+			thr.start()
+
 		self.peers.append(peer)
-		self.R.add(peer)
+		self.Server.add(peer)
 		self.logger.debug('Peer (' + peer.raw_ip + ':' + str(peer.raw_port) + ') added')
 
 	def remove(self,peer):
 		try:
 			self.peers.remove(peer)
-			self.R.remove(peer)
+			self.Server.remove(peer)
 		except:
 			pass
+
+		# if last peer is disconnected -> pause working
+		if not self.peers:
+			self.work = False
+
 		self.logger.debug('Peer (' + peer.raw_ip + ':' + str(peer.raw_port) + ') removed')
 
 	def can_add_peer(self):
@@ -165,100 +195,100 @@ class StreamContainer(threading.Thread):
 
 	def run(self):
 		if self.is_server:
-			#r = self.read_from(self.source)
-			try:
-				source = urllib2.urlopen(self.source)
-			except:
-				self.grenade.pull('Cannot open URL',self)
-				#raise Exception('Cannot open URL')
-
-			self.logger.info('URL opened successfully')
-			# Every digit in range(2**16) represents second
-			# Why 2 ** 16 ? Because we need to fit struct's '!H' format, 
-			# and it's quite enough time to work until we drop the counter => after 2 ** 16 seconds 
-			# we must restart count from 0 again
-			self.logger.info('Started main loop')
+			source = self.source
 			# This is done to be able to watch http-stream in server machine
 			# maybe it's not necessary but will be good )
 			self.B.inited = True
+			recon_tried = 0
+			source.connect()
 			i = 0
 			while self.work:
-				t = time()
-				d = ''
-				while (time() - t) < 1:
-					try : 
-						d += source.read(1024)
-					except :
-						self.grenade.pull('Cannot fetch data from source, COUNTER --> ' + str(i),self)
-						#raise Exception
+				d = source.read()
+
+				# there is a problem with source
+				if not d:
+					# we must reconnect 3 times before closing Container
+					if recon_tried < 3:
+						source.reconnect()
+						recon_tried += 1
+						continue
+					else:
+						self.grenade.pull('Cannot fetch data from Source',self)
+						break
+
 				# why len(d) + 4 ? Because we must to take into account 4 bytes of length
 				# and if we didn't do that, everytime a piece transferred, trailing 4 bytes of data 
 				# will not be recieved by peer
 				d = pack('!I',len(d) + 4) + d				
 				self.B.put(i,d)
-				self.pos = i
 				# i.e. 65535
 				if i == COUNTER:
 					i = 0
 				else:
 					i += 1
+			# exiting
+			source.close()
+
 		else:
-			if self.connect_server(self.info['ip'],self.info['port']):
-				requests = self.requests
-				pos = self.start_pos
-				
-				# starting connection to nodes
-				if self.info.get('nodes',[]):
-					threading.Thread(target=self.connect_nodes,daemon=True).start()				
-				
-				self.logger.info('Started main loop')
-				while self.work:
-					# selecting only handshaked peers
-					peers = filter(lambda x : x.handshaked,self.peers)
-					for peer in sorted(peers,key=lambda x : x.upload_speed,reverse=True):
-						if peer.closed:
-							continue	
-						elif peer.need_keep_alive:
-							peer.send_keep_alive()
-						elif peer.can_request:
-							# peer has not job in queue and it's disconnected
-							if peer.timeout:
-								self.logger.debug('Connection with peer (' + peer.raw_ip + ':' \
-									+ str(peer.raw_port) + ') timed out')
-								peer.handle_close()	
-								continue
-							'''
-							!!! Основная логика !!!
-							'''
-							c = True
-							for req in requests:
-								if peer.have(req[0]):
-									self.logger.debug('Retry Request ' + str(req))
-									peer.request_stream(req[0],req[1],req[2],req[3])
-									requests.remove(req)
-									c = False
-									break
-							# because we have to request only one "request" 
-							if not c:
-								continue
-							# if there are no appropriate request in self.requests
-							# or there are no requests in self.requests => try to request stream by position
-							elif peer.have(pos):	
-								s = self.get_seconds(peer)
-								peer.request_stream(pos,0,STREAM_PIECE_SIZE,s)
-								pos = pos + s
-								# because we reset our counter after COUNTER => 
-								# if we have pos = 65536 and COUNTER = 65536 => new pos will be 
-								# equal to pos = 0, because pos = 65536 will not be appropriate for struct
-								# format '!I' (max is 65535, you can check it!)
-								if pos >= COUNTER:
-									pos = pos - COUNTER	
-						else:
-							# peer has job in queue, but there is a timeout
-							if peer.timeout:
-								self.logger.debug('Request timeout of peer (' + peer.raw_ip + ':' \
-									+ str(peer.raw_port) + ') has reached. Retrying request')
-								requests.extend(peer.return_requests())
+			requests = self.requests
+			
+			while self.start_pos is None:
+				pass
+
+			pos = self.start_pos
+			
+			# starting connection to nodes
+			if self.info.get('nodes',[]):
+				threading.Thread(target=self.connect_nodes,daemon=True).start()				
+			
+			self.logger.info('Started main loop')
+			while self.work:
+				# selecting only handshaked peers
+				peers = filter(lambda x : x.handshaked,self.peers)
+				for peer in sorted(peers,key=lambda x : x.upload_speed,reverse=True):
+					if peer.closed:
+						continue	
+					elif peer.need_keep_alive:
+						peer.send_keep_alive()
+					elif peer.can_request:
+						# peer has not job in queue and it's disconnected
+						if peer.timeout:
+							self.logger.debug('Connection with peer (' + peer.raw_ip + ':' \
+								+ str(peer.raw_port) + ') timed out')
+							peer.handle_close()	
+							continue
+						'''
+						!!! Основная логика !!!
+						'''
+						c = True
+						for req in requests:
+							if peer.have(req[0]):
+								self.logger.debug('Retry Request ' + str(req))
+								peer.request_stream(req[0],req[1],req[2],req[3])
+								requests.remove(req)
+								c = False
+								break
+						# because we have to request only one "request" 
+						if not c:
+							continue
+						# if there are no appropriate request in self.requests
+						# or there are no requests in self.requests => try to request stream by position
+						elif peer.have(pos):	
+							s = self.get_seconds(peer)
+							peer.request_stream(pos,0,STREAM_PIECE_SIZE,s)
+							pos = pos + s
+							# because we reset our counter after COUNTER => 
+							# if we have pos = 65536 and COUNTER = 65536 => new pos will be 
+							# equal to pos = 0, because pos = 65536 will not be appropriate for struct
+							# format '!I' (max is 65535, you can check it!)
+							if pos >= COUNTER:
+								pos = pos - COUNTER	
+					else:
+						# peer has job in queue, but there is a timeout
+						if peer.timeout:
+							self.logger.debug('Request timeout of peer (' + peer.raw_ip + ':' \
+								+ str(peer.raw_port) + ') has reached. Retrying request')
+							requests.extend(peer.return_requests())
 
 			else:
 				self.grenade.pull('Cannot connect to server',self)
@@ -371,6 +401,8 @@ class PeeR:
 		self.t = False
 		self.closed = False
 		self.p = []
+		self.raw_ip = 'ip'
+		self.raw_port = 345
 
 	@property
 	def timeout(self):
@@ -407,7 +439,7 @@ def g(i,p):
 	return True
 
 def test_run():
-	s = StreamContainer({'content_id':'content_id','ip':'123','port':'233'},'peer_id',6590)
+	s = StreamContainer('grenade',{'content_id':'content_id','ip':'123','port':'233','name':'wewf'},'peer_id',6590,'Reactor',debug=True)
 	s.connect_server = g
 	s.start_pos = 65534
 	
@@ -470,8 +502,8 @@ def test_run():
 	p12.p = [65534]
 	
 	s.peers = [p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12]
-	s.start()
-	sleep(1.0)
+	s.run()
+	#sleep(1.0)
 	s.work = False
 	assert p12.req == [(65534,0,STREAM_PIECE_SIZE,3)]
 	assert not p8.closed
