@@ -63,11 +63,18 @@ class StreamContainer:
 		# after receiving peers list, connection with server will be used in requesting stream
 		# but program will not send any statistics to the server any more
 
-		# this is source's initialisation -> we should check if it works
-		self.source = self.select_for(source)
-		if not is_server and not debug:
-			if not self.connect_server(info['ip'],info['port']):
-				self.grenade.pull('Cannot Connect to Server',self)
+		if not debug:
+			if not is_server:
+				self.source = ''
+				server = self.connect_server(info['ip'],info['port'])
+				if server is not None:
+					self.add(server)
+				else:
+					self.grenade.pull('Cannot Connect to Server',self)
+			else:
+				# this is source's initialisation -> we should check if it works if this is not tamchy-file opening
+				self.source = self.select_for(source)
+
 
 	def connect_server(self,ip,port):
 		s = Peer(self.content_id,self.handshake,\
@@ -77,7 +84,7 @@ class StreamContainer:
 			r,w,e = select.select([],[s],[],WRITE_WAIT_TIMEOUT)
 			if not w:
 				self.logger.error('Server connection timeout')
-				return False
+				return 
 			s.request_peers()
 			s.handle_write()
 			# waiting for response from server to our request
@@ -85,16 +92,15 @@ class StreamContainer:
 			r,w,e = select.select([s],[],[],READ_WAIT_TIMEOUT)
 			if not r:
 				self.logger.error('Server does not respond')
-				return False
+				return 
 			s.handle_read()
 			if not s.handshaked:
 				self.logger.error('Server incorrectly responded')
-				return False
+				return 
 			self.logger.info('Server connection success')
-			self.add(s)
-			return True
+			return s
 		self.logger.error('Cannot connect to the server')
-		return False
+		return 
 
 	def select_for(self,source):
 		s = source.split(':')[0]
@@ -136,7 +142,8 @@ class StreamContainer:
 		# if it's first peer's connection -> start working
 		if not self.peers:
 			self.work = True
-			thr = threading.Thread(target=self.run,daemon=True)
+			thr = threading.Thread(target=self.run)
+			thr.daemon = True
 			thr.start()
 
 		self.peers.append(peer)

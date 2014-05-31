@@ -1,5 +1,5 @@
 # -*- coding:utf-8 -*-
-import multiprocessing,io,pickle,sqlite3,socket,logging,sys,os
+import multiprocessing,io,pickle,sqlite3,socket,logging,sys,os,random
 import messages
 from StringIO import StringIO
 from Reactor import Reactor
@@ -31,11 +31,13 @@ IP_CHECKER = 'http://wtfismyip.com/text'
 BUFFERING_SECONDS = 30
 HTTP_PORT = 8001
 
+pattern = re.compile(r'[a-zA-Z0-9]{32}')
+
 
 # this class will catch any fatal error while program is running
 # and then it will gracefully close Container instance
 
-class grenade:
+class Grenade:
 	def __init__(self,Client):
 		self.C = Client
 		self.pulled = False
@@ -67,8 +69,6 @@ class Client:
 		buffering_units -> This is a number of video stream units for buffering
 		all peers list is saved in DB
 		'''
-		#Thread.__init__(self)
-		#self.daemon = True
 		self.logger = logging.getLogger('tamchy')
 		self.logger.setLevel(logging.DEBUG)
 		f = logging.FileHandler('tamchy.log')
@@ -86,38 +86,25 @@ class Client:
 		self.db = sqlite3.connect('DataBase.db')
 		self.logger.info('Client started')
 		# getting our external ip
-		#try:
-		#	ip = urlopen(IP_CHECKER).read().strip()
-		#	self.logger.info('Obtained external IP')
-		#	self.logger.debug('Obtained external IP - ' + ip)
-		#except:
-		#	self.logger.error('Cannot obtain external url')
-		#	raise Exception("Cannot check url")
-		self.ip = '127.0.0.1'
-		#self.http_server = HTTPServer(7668,self)
+		self.ip = self.get_ext_ip()
 		# 'port':Server instance
 		self.ports = {}
 		self.env = Environment(loader=FileSystemLoader('templates'))
 		self.urls = {}
 		if not debug:
 			self.start_http_server()
-		self.grenade = grenade(self)
 
-	def create_urls_tree(self):
-		urls = {}
-		host = cherrypy.config['server.socket_host']
-		port = cherrypy.config['server.socket_port']
-
-		urls['index'] = 'http://{0}:{1}/'.format(host,port)
-		urls['create_stream'] = 'http://{0}:{1}/create_stream'.format(host,port)
-		urls['open_stream'] = 'http://{0}:{1}/open_stream'.format(host,port)
-		urls['list'] = 'http://{0}:{1}/streams'.format(host,port)
-		urls['exit'] = 'http://{0}:{1}/exit'.format(host,port)
-
-		return urls
+	def get_ext_ip(self):
+		try:
+			ip = urlopen(IP_CHECKER).read().strip()
+			self.logger.debug('Obtained external IP - ' + ip)
+		except:
+			self.logger.error('Cannot obtain external ip')
+			raise Exception("Cannot obtain external ip")
+		return ip
 
 	def validate(self,c_id):
-		if len(c_id) == 32:
+		if (len(c_id) == 32) and pattern.match(c_id):
 			return True
 		return False
 
@@ -132,6 +119,8 @@ class Client:
 		payload['ip'] = self.ip
 		payload['port'] = port
 		payload['nodes'] = nodes
+
+		grenade = Grenade(self)
 		
 		server = self.ports.get(port,'')
 		if not server:
@@ -142,10 +131,10 @@ class Client:
 				raise Exception('Cannot Create Server on given port. Give another port')
 			self.ports[port] = server
 
-		s = StreamContainer(self.grenade,payload,self.peer_id,port,server,source=source,is_server=True,ext_ip=self.ip)
+		s = StreamContainer(grenade,payload,self.peer_id,port,server,source=source,is_server=True,ext_ip=self.ip)
 		# if source is None => something went wrong with connection to source
 		# and grenade was pulled
-		if not self.grenade.pulled:
+		if not grenade.pulled:
 			self._streams[content_id] = s
 			
 			server.register_stream(s)
@@ -153,7 +142,7 @@ class Client:
 			self.logger.debug('New StreamContainer (' + content_id + ') added to streams')
 			#s.start()
 		else:
-			raise Exception(self.grenade.error)
+			raise Exception(grenade.error)
 	
 	def _open_stream(self,file,port=7889):
 		#try:
@@ -166,6 +155,8 @@ class Client:
 		#except: 
 		#	self.logger.error('Cannot open file')
 		#	raise Exception('Cannot open tamchy-file')
+
+		grenade = Grenade(self)
 		
 		server = self.ports.get(port,'')
 		if not server:
@@ -176,8 +167,8 @@ class Client:
 				raise Exception('Cannot Create Server on given port. Give another port')
 			self.ports[port] = server
 		
-		s = StreamContainer(self.grenade,info,self.peer_id,port,server,ext_ip=self.ip)
-		if not self.grenade.pulled:
+		s = StreamContainer(grenade,info,self.peer_id,port,server,ext_ip=self.ip)
+		if not grenade.pulled:
 			self._streams[info['content_id']] = s
 			
 			server.register_stream(s)
@@ -185,7 +176,7 @@ class Client:
 			self.logger.debug('New StreamContainer (' + info['content_id'] + ') added to streams')
 			#s.start()
 		else:
-			raise Exception(self.grenade.error)
+			raise Exception(grenade.error)
 
 	def close(self):
 		for i in self._streams.values():
@@ -322,12 +313,16 @@ def generate_c_id(length=32):
 
 # ---------------------------------------- Testing ----------------------------------------------------
 class SC:
-	def __init__(self,grenade,payload,peer_id,port,Reactor,source,is_server,ext_ip):
-		self.content_id = 'content_id'
+	def __init__(self,grenade,payload,peer_id,port,server,source,is_server=True,ext_ip=''):
+		self.content_id = payload['content_id']
+		self.grenade = grenade
+		self.Server = server
 		if payload['name'] == 'success':
 			grenade.pulled =  False
 		else:
 			grenade.pulled = True
+	def close(self):
+		pass
 
 def test():
 	# this is a little hack to replace imported StreamContainer with another class to make tests
@@ -369,23 +364,50 @@ def test():
 	assert len(c._streams) == 4
 	assert len(c.ports) == 3
 	assert err
+	print(c.ports[7889].streams)
+	s = c.ports[7889].streams.keys()
+	s1 = c.ports[7889].streams[s[0]]
+	s1.grenade.pull('d',s1)
+	assert len(c.ports) == 3
+	assert len(c._streams) == 3
+	s1 = c.ports[7889].streams[s[1]]
+	s1.grenade.pull('d',s1)
+	assert len(c.ports) == 3
+	assert len(c._streams) == 2
+	s = c.ports[5463].streams.keys()
+	s1 = c.ports[5463].streams[s[0]]
+	s1.grenade.pull('d',s1)
+	assert len(c._streams) == 1
+	assert len(c.ports) == 2
 # -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-* Testing -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-
 
 if __name__ == '__main__':
-	c = Client()
-	while c.work:
-		pass
-	# user clicked exit button
-	c.close()
-	# 1 --> SIGHUP
-	os.kill(os.getppid(),1)
-
-	#t = sys.argv[1]
-	#c=Client(debug=True)
-	#if t == 's':
-	#	c._create_stream('test','http://127.0.0.1:8080',content_id='w5vi59e7iysc3uu60pn7gasxkwf3hecc')
-	#else:
-	#	file = open('umut.tamchy','rb')
-	#	c._open_stream(file,port=6590)
-	#while True:
-	#	pass
+	mode = sys.argv[1]
+	if mode == 'debug':
+		t = sys.argv[2]
+		c=Client(debug=True)
+		if t == 's':
+			c._create_stream('test','http://127.0.0.1:8080',content_id='w5vi59e7iysc3uu60pn7gasxkwf3hecc')
+		else:
+			file = open('umut.tamchy','rb')
+			c._open_stream(file,port=6590)
+		while True:
+			pass
+	else:
+		c = Client()
+		while c.work:
+			pass
+		# user clicked exit button
+		c.close()
+		# 1 --> SIGHUP
+		os.kill(os.getppid(),1)
+	
+		#t = sys.argv[1]
+		#c=Client(debug=True)
+		#if t == 's':
+		#	c._create_stream('test','http://127.0.0.1:8080',content_id='w5vi59e7iysc3uu60pn7gasxkwf3hecc')
+		#else:
+		#	file = open('umut.tamchy','rb')
+		#	c._open_stream(file,port=6590)
+		#while True:
+		#	pass	
