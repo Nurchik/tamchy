@@ -10,11 +10,9 @@ and start watching any from that list.
 
 Usage
 Type in command line:
-	python Client.py
+	python tamchy.py
 or
-	./ Client.py
+	./ tamchy.py
 
 LICENSE
 This program is distributed under MIT License.
-
-CONTRIBUTE
