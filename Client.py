@@ -16,7 +16,6 @@ from network import HTTPServer
 import cherrypy
 from jinja2 import Environment, FileSystemLoader
 from cherrypy.lib.static import serve_fileobj
-
 import os.path
 
 STATIC_CONFIG = {
@@ -26,10 +25,6 @@ STATIC_CONFIG = {
                 '/images' : {'tools.staticdir.on' : True , 'tools.staticdir.dir' : 'images'}
                 }
 
-
-IP_CHECKER = 'http://wtfismyip.com/text'
-BUFFERING_SECONDS = 30
-HTTP_PORT = 8001
 
 pattern = re.compile(r'[a-zA-Z0-9]{32}')
 
@@ -63,16 +58,66 @@ class Grenade:
         self.error = error
         self.logger.error(error)
 
+class ConfigLoader:
+    '''
+    Configuration file must be stored in tamchy.conf file in same folder as tamchy.py
+    format must be -> KEY = VALUE <- and each key,value must be separated with newline(\n)
+    '''
+    def __init__(self):
+        self.default_config = {
+            'HTTP_HOST' : '127.0.0.1',
+            'HTTP_PORT' : 8001,
+            'BUFFERING_SECONDS' : 30,
+            'IP_CHECKER' : 'http://wtfismyip.com/text',
+            'DEBUG' : 0,
+            'LOG_FILE' : 'tamchy.log'
+            }
+        self.config = self.parse_config()
+
+    def parse_config(self):
+        try:
+            f = io.open('tamchy.conf','r')
+        # maybe conf-file does not exist or it's not accessible
+        except:
+            return self.default_config
+        c = {}
+        for line in f:
+            # trimming all whitespaces
+            line = line.replace(' ','')
+            # why if? maybe line is empty (last line)
+            if line:
+                key,value = line.split('=')
+                # just making uppercase
+                key = key.upper()
+                c[key] = value
+        f.close()
+        return c
+
+    def __setitem__(self,key,value):
+        self.config[key.upper()] = value
+
+    def __getitem__(self,key):
+        if key in self.config:
+            return self.config[key]
+        # maybe key is left default in config-file
+        else:
+            self.default_config.get(key,'')
+
+    def __delitem__(self,key):
+        if key in self.config:
+            del self.config[key]
+
 class Client:
-    def __init__(self,buffering_units=3,debug=False):
+    def __init__(self,debug=False):
         '''
         buffering_units -> This is a number of video stream units for buffering
         all peers list is saved in DB
         '''
+        self.config = ConfigLoader()
         self.logger = logging.getLogger('tamchy')
-        self.logger.setLevel(logging.DEBUG)
-        f = logging.FileHandler('tamchy.log')
-        f.setLevel(logging.DEBUG if debug else logging.INFO)
+        self.logger.setLevel(self.config['DEBUG'])
+        f = logging.FileHandler(self.config['LOG_FILE'])
+        f.setLevel(self.config['DEBUG'])
         formatter = logging.Formatter('%(asctime)s -- %(name)s ( %(filename)s : %(lineno)d) -- %(message)s')
         f.setFormatter(formatter)
         self.logger.addHandler(f)
@@ -91,12 +136,12 @@ class Client:
         self.ports = {}
         self.env = Environment(loader=FileSystemLoader('templates'))
         self.urls = {}
-        if not debug:
+        if not debug:    
             self.start_http_server()
 
     def get_ext_ip(self):
         try:
-            ip = urlopen(IP_CHECKER).read().strip()
+            ip = urlopen(self.config['IP_CHECKER']).read().strip()
             self.logger.debug('Obtained external IP - ' + ip)
         except:
             self.logger.error('Cannot obtain external ip')
@@ -198,7 +243,7 @@ class Client:
 
     def start_http_server(self):
         #cherrypy.config.update({'server.socket_host': '127.0.0.1','server.socket_port': HTTP_PORT})
-        cherrypy.config.update({'server.socket_host': '127.0.0.1','server.socket_port': HTTP_PORT,'environment': 'production'})
+        cherrypy.config.update({'server.socket_host': self.config['HTTP_HOST'],'server.socket_port': self.config['HTTP_PORT'],'environment': 'production'})
         cherrypy.tree.mount(self,'/',config=STATIC_CONFIG)
 
         #self.urls = self.create_urls_tree()
@@ -379,6 +424,11 @@ def test():
     s1.grenade.pull('d',s1)
     assert len(c._streams) == 1
     assert len(c.ports) == 2
+
+
+def test_conf():
+    c = ConfigLoader()
+
 # -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-* Testing -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-
 
 if __name__ == '__main__':
