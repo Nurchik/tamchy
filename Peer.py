@@ -170,7 +170,7 @@ class Peer:
             
             # we must send handshake-message and the current position
             self.send_buffer += (self.handshake + self.B.get_pos())
-            self.C.connected_peers += 1
+            #self.C.connected_peers += 1
             self.handshaked = True
         
         else:
@@ -263,7 +263,7 @@ class Peer:
                     if msg[12:44] == self.content_id:
                         if self.server:
                             self.C.set_pos(struct.unpack('!H',msg[66:68])[0])
-                        self.C.connected_peers += 1
+                        #self.C.connected_peers += 1
                         self.handshaked = True
                         self.logger.debug('Connection with peer ' + (self.raw_ip + ':' + str(self.raw_port)) + ' established')
                         continue
@@ -453,8 +453,8 @@ class Peer:
         self.C.remove(self)
         self.socket.close()
         self.closed = True
-        if self.handshaked:
-            self.C.connected_peers -= 1
+        #if self.handshaked:
+        #    self.C.connected_peers -= 1
         self.logger.info('Closing connection with peer')
         #if (not self.initiated and self.handshaked) or self.initiated:
         #   self.C.delete_peer(self.ip,self.port)
@@ -504,7 +504,6 @@ class sock:
 
 class ContaineR:
     def __init__(self):
-        self.connected_peers = 0
         self.start_pos = 0
         self.deleted = False
         self.prepared = ''
@@ -589,13 +588,11 @@ def test_read():
     assert len(p.streamer) == 1
     assert len(p.requested[0].buffer) == 2
     assert not p.store.have(23)
-    c.connected_peers = 2
     s.r_buf = [struct.pack('!I',13) + STOP + struct.pack('!HIIH',1,0,15,2), struct.pack('!I',5) + HAVE + struct.pack('!I',23),struct.pack('!I',1) + CLOSE, 'except']
     p.handle_read()
     assert not p.streamer
     assert p.store.have(23)
     assert c.deleted
-    assert c.connected_peers == 1
 
 def test_write():
     def g(n):

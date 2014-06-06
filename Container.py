@@ -53,7 +53,7 @@ class StreamContainer:
         self.Server = Server
         self.B = StreamBuffer(self,grenade)
         self.work = True
-        self.connected_peers = 0
+        #self.connected_peers = 0
         self.max_connections = max_connections
         self.peers = []
         self.start_pos = None
@@ -166,7 +166,11 @@ class StreamContainer:
     def can_add_peer(self):
         if self.is_server:
             return True
-        return self.connected_peers < self.max_connections
+        return len(self.peers) < self.max_connections
+
+    @property
+    def connected_peers(self):
+        return len(self.peers)
 
     def get_seconds(self,peer):
         # for connection to the server we need request not more than 3 seconds at once,
