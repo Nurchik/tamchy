@@ -7,170 +7,179 @@ import socket
 import logging
 import select
 import pickle
-from Reactor import Reactor
 from Buffer import StreamBuffer
 from Peer import Peer
-from Server import Server
+from Server import Server,encode,decode
 import messages
 from time import time,sleep
 from struct import pack,unpack
 from StringIO import StringIO
 import Input
+from Request import Request
 
 DEFAULT_BUFFERING_SIZE = 128 * 1024
 WRITE_WAIT_TIMEOUT = 15.0
 READ_WAIT_TIMEOUT = 15.0
+SOCKET_TIMEOUT = 20.0
 STREAM_PIECE_SIZE = 16384
 COUNTER = (2 ** 16) - 1
-
-def hex(t):
-    return pack('!I',t)
-
-def num(t):
-    return unpack('!I',t)[0]
-
+   
 
 '''
 :source is a http source for video to stream
 '''
 
 class StreamContainer:
-    def __init__(self,grenade,info,peer_id,port,Server,max_connections=50,is_server=False,source='',bitrate=0,ext_ip='',debug=False):
+    def __init__(self,Client,PStorage,info,port,max_connections=50,is_server=False,source='',bitrate=0,ext_ip='',debug=False):
         self.logger = logging.getLogger('tamchy.StreamContainer')
+        
         #threading.Thread.__init__(self)
-        self.daemon = True
+        #self.daemon = True
+        self.work = True
+        self.paused = False
+
         self.info = info
-        self.grenade = grenade
-        self.name = info['name']
         self.ext_ip = ext_ip
-        self.peer_id = peer_id
         self.port = port
+        self.max_connections = max_connections
         self.is_server = is_server
         self.bitrate = bitrate
-        self.content_id = info['content_id']
-        self.handshake = messages.construct_handshake(self.content_id,peer_id,port)
+        self.Client = Client
+        self.PStorage = PStorage
+        self.debug = debug
+
+        self.B = StreamBuffer(info['content_id'],self.close,self.tell_have)
         self.lock = threading.Lock()
-        self.Server = Server
-        self.B = StreamBuffer(self,grenade)
-        self.work = True
-        #self.connected_peers = 0
-        self.max_connections = max_connections
+
+        self.name = info['name']
+        self.content_id = info['content_id']
+        self.chunk_length = info['chunk_length']
+        
         self.peers = []
-        self.start_pos = None
-        self.add_new_stream()
-        self.requests = []
-        self.logger.debug('StreamContainer (' + self.content_id + ') created')
+        self.requests = []    
+
+        self.logger.debug('StreamContainer (%s) created' % (self.content_id))
         # after receiving peers list, connection with server will be used in requesting stream
         # but program will not send any statistics to the server any more
 
+        self.add_new_stream()
         if not debug:
             if not is_server:
                 self.source = ''
                 server = self.connect_server(info['ip'],info['port'])
                 if server is not None:
-                    self.add(server)
+                    self.pos = server.pos
+                    self.piece_length = server.piece_length
+                    self.PStorage.add(server)
                 else:
-                    self.grenade.pull('Cannot Connect to Server',self)
+                    self.close()
+                    raise Exception('Cannot Connect to Server')
             else:
-                # this is source's initialisation -> we should check if it works if this is not tamchy-file opening
-                self.source = self.select_for(source)
+                # this is source's initialisation -> we should check if it works
+                self.source = self.select_for(source,self.chunk_length)
+                self.pos = 0
+                self.piece_length = self.source.piece_length
+            
+    #def get_piece_length(self):
+    #    return struct.pack('!I',self.piece_length)
 
+    def build_handshake(self):
+        if self.is_server:
+            handshake = 'Salamatsyzby' + self.content_id + struct.pack('!H',self.port) + pack('!HI',self.pos,self.piece_length)
+        else:
+            handshake = 'Salamatsyzby' + self.content_id + struct.pack('!H',self.port)
+        handshake = struct.pack('!I',len(handshake)) + handshake
+        return handshake
 
-    def connect_server(self,ip,port):
-        s = Peer(self.content_id,self.handshake,\
-                 self,self.B,ip=ip,port=port,server=True)
-        if s.socket is not None:
-            # waiting for connection with timeout
-            r,w,e = select.select([],[s],[],WRITE_WAIT_TIMEOUT)
+    def connect_server(self,ip,port,node=False):
+        handshake = 'Salamatsyzby' + self.content_id + self.peer_id + struct.pack('!H',self.port)
+        handshake = pack('!I',len(handshake)) + handshake
+        stream_data = {'content_id':self.content_id,'chunk_length':0,'piece_length':0, 'handshake':handshake}
+        p = Peer(stream_data,self,self.Buffer,ip=ip,port=port,server=True,node=node)
+        if p.socket is not None:
+            r,w,e = select.select([p],[p],[p],SOCKET_TIMEOUT)
             if not w:
-                self.logger.error('Server connection timeout')
-                return 
-            s.request_peers()
-            s.handle_write()
-            # waiting for response from server to our request
-            # we use select.select because we need unblocking method with timeout :)
-            r,w,e = select.select([s],[],[],READ_WAIT_TIMEOUT)
+                self.logger.error('Server (%s:%s) is not available' % (ip,port))
+                return
+            p.request_peers()
+            p.handle_write()
+            r,w,e = select.select([p],[p],[p],SOCKET_TIMEOUT)
             if not r:
-                self.logger.error('Server does not respond')
-                return 
-            s.handle_read()
-            if not s.handshaked:
-                self.logger.error('Server incorrectly responded')
-                return 
-            self.logger.info('Server connection success')
-            return s
-        self.logger.error('Cannot connect to the server')
-        return 
+                self.logger.error('Server (%s:%s) does not respond' % (ip,port))
+                return
+            p.handle_read()
+            if not p.handshaked:
+                self.logger.error('Could not connect to Server (%s:%s)' % (ip,port))
+                return
+            self.logger.info('Connection with Server (%s:%s) established' % (ip,port))
+            return p
+        else:
+            self.logger.error('Server (%s:%s) is not available' % (ip,port))
+            return
 
-    def select_for(self,source):
+        #s = socket.socket()
+        #s.settimeout(SOCKET_TIMEOUT)
+        #try:
+        #    s.connect((ip,port))
+        #except (socket.error,socket.timeout) as e:
+        #    self.logger.error('%s - %s' % (e.errno,e.message))
+        #    return 
+        #handshake = 'Salamatsyzby' + self.content_id + self.peer_id + struct.pack('!H',self.port) + pack('!HI',0,0)
+        #handshake = pack('!I',len(handshake)) + handshake
+        #msg = GET_PEERS + pack('!B',35)
+        #msg = pack('!I',len(msg)) + msg
+        #s.send(handshake)
+        #s.send(msg)
+        #try:
+        #    data = s.read(4096)
+        #except (socket.error,socket.timeout) as e:
+        #    self.logger.error('%s - %s' % (e.errno,e.message))
+        #    return 
+        #while data:
+        #   length = unpack('!I',data[:4])[0]
+        #   if length > 
+
+    def select_for(self,source,chunk_length):
         s = source.split(':')[0]
         if s == 'http':
-            i = Input.HTTPInput(source)
+            i = Input.HTTPInput(source,chunk_length)
             if i.con == None:
-                self.grenade.pull('Cannot connect to source',self)
-                return 
+                self.close()
+                raise Exception('Cannot connect to source')
             # we must close connection to source until we need it later to prevent source's buffer overflow
             i.con.close()
             return i
         else:
-            self.grenade.pull('Cannot Recognize Input source',self)
+            self.close()
+            raise Exception('Cannot Recognize Input source')
 
     def prepare_peers(self,peers):
         for i in xrange(len(peers)/6):
             raw = peers[0+i*6:6+i*6]
-            ip,port = raw[0:4],raw[4:6]
-            if '.'.join([str(i) for i in unpack('!BBBB',ip)]) == self.ext_ip \
-                        and unpack('!H',port)[0] == self.port:
+            ip,port = decode(ip=raw[0:4],port=raw[4:6])
+            if ip == self.ext_ip and port == self.port:
                 continue
-            if self.can_add_peer():
+            if self.PStorage.can_add_peer(content_id=self.content_id):
                 self.prepare_peer(ip=ip,port=port)  
 
-    def prepare_peer(self,ip=None,port=None,sock=None,buf=''):
+    def prepare_peer(self,ip,port,sock=None,buf=''):
+        stream_data = {'content_id':self.content_id,'chunk_length':self.chunk_length,'piece_length':self.piece_length, 'handshake':self.build_handshake()}
         if sock is None:
-            ip = '.'.join([str(x) for x in unpack('!BBBB',ip)])
-            port = unpack('!H',port)[0]
-            p = Peer(self.content_id,self.handshake,self,self.B,ip=ip,port=port)
+            #ip = '.'.join([str(x) for x in unpack('!BBBB',ip)])
+            #port = unpack('!H',port)[0]
+            p = Peer(stream_data,self,self.B,ip=ip,port=port,buf=buf)
         else:
-            p = Peer(self.content_id,self.handshake,self,self.B,ip=ip,port=port,sock=sock,buf=buf)
+            p = Peer(stream_data,self,self.B,ip=ip,port=port,sock=sock,buf=buf)
         self.add_new_peer(ip,port)
-        self.add(p)
+        self.PStorage.add(p)
+        #if self.paused: 
+        #    t = threading.Thread(target=self.run)
+        #    t.daemon = True
+        #    t.start()
+        #    self.paused = False
 
     def get_file(self):
         return StringIO(pickle.dumps(self.info))
-
-    def add(self,peer):
-        # if it's first peer's connection -> start working
-        if not self.peers:
-            self.work = True
-            thr = threading.Thread(target=self.run)
-            thr.daemon = True
-            thr.start()
-
-        self.peers.append(peer)
-        self.Server.add(peer)
-        self.logger.debug('Peer (' + peer.raw_ip + ':' + str(peer.raw_port) + ') added')
-
-    def remove(self,peer):
-        try:
-            self.peers.remove(peer)
-            self.Server.remove(peer)
-        except:
-            pass
-
-        # if last peer is disconnected -> pause working
-        if not self.peers:
-            self.work = False
-
-        self.logger.debug('Peer (' + peer.raw_ip + ':' + str(peer.raw_port) + ') removed')
-
-    def can_add_peer(self):
-        if self.is_server:
-            return True
-        return len(self.peers) < self.max_connections
-
-    @property
-    def connected_peers(self):
-        return len(self.peers)
 
     def get_seconds(self,peer):
         # for connection to the server we need request not more than 3 seconds at once,
@@ -202,7 +211,9 @@ class StreamContainer:
 
     def connect_nodes(self):
         for ip,port in self.info['nodes']:
-            self.connect_server(ip,port)
+            node = self.connect_server(ip,port,node=True)
+            if node:
+                self.PStorage.add(node)
 
     def run(self):
         if self.is_server:
@@ -212,7 +223,7 @@ class StreamContainer:
             self.B.inited = True
             recon_tried = 0
             source.connect()
-            i = 0
+            #i = 0
             while self.work:
                 d = source.read()
 
@@ -224,59 +235,58 @@ class StreamContainer:
                         recon_tried += 1
                         continue
                     else:
-                        self.grenade.pull('Cannot fetch data from Source',self)
+                        self.close()
+                        self.logger.error('Cannot fetch data from source')
                         break
 
                 # why len(d) + 4 ? Because we must to take into account 4 bytes of length
                 # and if we didn't do that, everytime a piece transferred, trailing 4 bytes of data 
                 # will not be recieved by peer
-                d = pack('!I',len(d) + 4) + d               
-                self.B.put(i,d)
+                #d = pack('!I',len(d) + 4) + d               
+                self.B.put(self.pos,d)
                 # i.e. 65535
-                if i == COUNTER:
-                    i = 0
+                if self.pos == COUNTER:
+                    self.pos = 0
                 else:
-                    i += 1
+                    self.pos += 1
             # exiting
             source.close()
 
-        else:
-            requests = self.requests
-            
-            while self.start_pos is None:
-                pass
-
-            pos = self.start_pos
-            
+        else:            
             # starting connection to nodes
             if self.info.get('nodes',[]):
-                threading.Thread(target=self.connect_nodes,daemon=True).start()             
+                t = threading.Thread(target=self.connect_nodes)
+                t.daemon = True
+                t.start()             
             
             self.logger.info('Started main loop')
+            pos = self.pos
+
             while self.work:
                 # selecting only handshaked peers
-                peers = filter(lambda x : x.handshaked,self.peers)
-                for peer in sorted(peers,key=lambda x : x.upload_speed,reverse=True):
-                    if peer.closed:
-                        continue    
-                    elif peer.need_keep_alive:
+                peers = self.PStorage.get_peers(self.content_id)
+                
+                # if there are no peers - pause working
+                # the work will be resumed by self.prepare_peer
+                #if not peers:
+                #    self.paused = True
+                #    return 
+                
+                for peer in sorted(peers,key=lambda x : x.upload_speed,reverse=True): 
+                    if peer.need_keep_alive:
                         peer.send_keep_alive()
+                    # peer doesn't have pending requests
                     elif peer.can_request:
-                        # peer has not job in queue and it's disconnected
-                        if peer.timeout:
-                            self.logger.debug('Connection with peer (' + peer.raw_ip + ':' \
-                                + str(peer.raw_port) + ') timed out')
-                            peer.handle_close() 
-                            continue
-                        '''
-                        !!! Основная логика !!!
-                        '''
                         c = True
-                        for req in requests:
-                            if peer.have(req[0]):
-                                self.logger.debug('Retry Request ' + str(req))
-                                peer.request_stream(req[0],req[1],req[2],req[3])
-                                requests.remove(req)
+                        # selecting only idle requests
+                        for request in self.requests:
+                            # if peer have first piece we will request that piece
+                            # in hope that other pieces will arrive to the peer while sending
+                            # first one
+                            if peer.have(request.pos):
+                                self.logger.debug('Retry Request %s' % (request))
+                                self.requests.remove(request)
+                                peer.request_stream(request)
                                 c = False
                                 break
                         # because we have to request only one "request" 
@@ -284,38 +294,49 @@ class StreamContainer:
                             continue
                         # if there are no appropriate request in self.requests
                         # or there are no requests in self.requests => try to request stream by position
-                        elif peer.have(pos):    
+                        elif peer.have(pos):  
                             s = self.get_seconds(peer)
-                            peer.request_stream(pos,0,STREAM_PIECE_SIZE,s)
+                            request = Request(self.B,self.piece_length,self.chunk_length,pos,s)
+                            peer.request_stream(request)
+                        #   peer.request_stream(pos,STREAM_PIECE_SIZE,s)
                             pos = pos + s
                             # because we reset our counter after COUNTER => 
                             # if we have pos = 65536 and COUNTER = 65536 => new pos will be 
                             # equal to pos = 0, because pos = 65536 will not be appropriate for struct
                             # format '!I' (max is 65535, you can check it!)
                             if pos >= COUNTER:
-                                pos = pos - COUNTER 
+                                pos = pos - COUNTER
                     else:
                         # peer has job in queue, but there is a timeout
-                        if peer.timeout:
-                            self.logger.debug('Request timeout of peer (' + peer.raw_ip + ':' \
-                                + str(peer.raw_port) + ') has reached. Retrying request')
-                            requests.extend(peer.return_requests())
+                        if peer.request_timeout:
+                            self.logger.debug('Request timeout of peer (%s) has reached. Retrying request' % (peer))
+                            self.requests.extend(peer.return_requests())
+
+                if self.debug:
+                    break
 
             else:
-                self.grenade.pull('Cannot connect to server',self)
+                self.close()
+                self.logger.error('Cannot connect to server')
 
         self.logger.debug('Main loop stopped')
 
     def return_reqs(self,reqs):
         self.requests.extend(reqs)
 
-    def set_pos(self,pos):
-        if self.start_pos is None:
-            self.start_pos = pos
-            self.B.got_pos()
+    #def set(self,pos,piece_length):
+    #    if self.pos is None:
+    #        #self.start_pos = pos
+    #        self.B.got_pos()
+    #        self.pos = pos
+    #        self.piece_length = piece_length
+    #        # starting work
+    #        t = threading.Thread(target=self.run)
+    #        t.daemon = True
+    #        t.start()
 
     def tell_have(self,t):
-        for peer in self.peers:
+        for peer in self.PStorage.get_peers(self.content_id):
             # don't send HAVE to server because it won't need this
             if peer.handshaked and not peer.server:
                 peer.send_have(t)
@@ -347,11 +368,12 @@ class StreamContainer:
     def add_new_peer(self,ip,port):
         db = sqlite3.connect('DataBase.db')
         db.text_factory = str
+        ip,port = self.encode(ip=ip,port=port)
         try:
             db.execute('insert into \"'+self.content_id+'\" values(null,?,?)',(ip,port))
             db.commit()
             self.logger.info('Peer added to DB')
-            self.logger.debug('Peer (' + ip + ':' + port + ') added to DB')
+            self.logger.debug('Peer (%s:%s) added to DB' % (ip,port))
         # maybe ip is exist
         except sqlite3.IntegrityError:
             self.logger.info('Peer already exists')
@@ -360,11 +382,12 @@ class StreamContainer:
     def delete_peer(self,ip):
         db = sqlite3.connect('DataBase.db')
         db.text_factory = str
+        ip = self.encode(ip=ip)
         try:
             db.execute('delete from \"'+self.content_id+'\" where ip=?',(ip,))
             db.commit()
             self.logger.info('Peer removed from DB')
-            self.logger.debug('Peer (' + ip + ') removed from DB')
+            self.logger.debug('Peer (%s) removed from DB' % (ip))
         except sqlite3.OperationalError:
             self.logger.info('Peer does not exist')
         db.close()
@@ -393,6 +416,7 @@ class StreamContainer:
         for peer in self.peers:
             peer.notify_closing()
         self.B.close()
+        self.Client.close_container(self)
         self.logger.debug('StreamContainer (' + self.content_id + ') terminated')
 
 # Testing
@@ -412,11 +436,15 @@ class PeeR:
         self.t = False
         self.closed = False
         self.p = []
-        self.raw_ip = 'ip'
-        self.raw_port = 345
+        self.ip = 'ip'
+        self.port = 345
 
     @property
     def timeout(self):
+        return self.t
+
+    @property
+    def request_timeout(self):
         return self.t
 
     @property
@@ -436,8 +464,8 @@ class PeeR:
     def have(self,pos):
         return pos in self.p
 
-    def request_stream(self,pos,offset,length,seconds):
-        self.req.append((pos,offset,length,seconds))
+    def request_stream(self,request):
+        self.req.append(request)
         self.can = False
 
     def return_requests(self):
@@ -445,14 +473,23 @@ class PeeR:
         self.req = []
         return r
 
+class PStorage:
+    def __init__(self):
+        self.peers = []
+
+    def get_peers(self,content_id):
+        return self.peers
 
 def g(i,p):
     return True
 
 def test_run():
-    s = StreamContainer('grenade',{'content_id':'content_id','ip':'123','port':'233','name':'wewf'},'peer_id',6590,'Reactor',debug=True)
-    s.connect_server = g
-    s.start_pos = 65534
+    ps = PStorage()
+    s = StreamContainer('client',ps,{'content_id':'content_id','ip':'123','port':'233','name':'wewf','chunk_length':12},6590,debug=True)
+    #s.connect_server = g
+    #s.start_pos = 65534
+    s.pos = 65534
+    s.piece_length = 17
     
     p1 = PeeR(1)
     p1.handshaked = True
@@ -463,7 +500,7 @@ def test_run():
     p2.handshaked = True
     p2.upload_speed = 6
     p2.can = False
-    p2.req = [(2,34,65,12)]
+    p2.req = [Request('buffer',16,2,2,12)]
     p2.t = True
     
     p3 = PeeR(3)
@@ -495,7 +532,7 @@ def test_run():
     p8 = PeeR(8)
     p8.handshaked = True
     p8.upload_speed = 8
-    p8.p = [1]
+    p8.p = [2]
     
     p9 = PeeR(9)
     p9.handshaked = True
@@ -512,45 +549,14 @@ def test_run():
     p12.upload_speed = 9
     p12.p = [65534]
     
-    s.peers = [p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12]
+    ps.peers = [p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12]
     s.run()
-    #sleep(1.0)
-    s.work = False
-    assert p12.req == [(65534,0,STREAM_PIECE_SIZE,3)]
+    assert p12.req[0].info == '(65534, -1, 3)'
     assert not p8.closed
-    assert p8.req == [(1,0,STREAM_PIECE_SIZE,3)]
+    assert p8.req[0].info == '(2, -1, 3)'
     assert p6.ka
     assert not p2.req
-    assert p4.req == [(2,34,65,12)]
+    assert p4.req[0].info == '(2, -1, 12)'
     assert not p7.ka
     assert not p9.closed
-    assert p1.closed
     assert p5.ka
-
-
-
-
-
-def test_DB():
-    pass
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

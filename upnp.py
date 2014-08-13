@@ -72,6 +72,8 @@ class UPNP:
             </s:Envelope>""" % action
 
     def request(self,service,action,**kw):
+        if not self.connection_established:
+            return 
         req = urllib2.Request(self.gateway_addr + self.controlUrls[service])
         envelope = self.get_envelope(service,action,**kw)
         req.add_header("content-type",'text/xml; charset="utf-8"')

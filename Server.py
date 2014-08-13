@@ -1,6 +1,5 @@
 import socket,struct,pickle,logging,time
 from Peer import Peer
-from Reactor import Reactor
 
 KEEP_ALIVE = struct.pack('!B',0)
 POSITION = struct.pack('!B',1)
@@ -11,80 +10,161 @@ CLOSE = struct.pack('!B',5)
 ERROR = struct.pack('!B',6)
 HAVE = struct.pack('!B',7)
 
-class TempPeer:
+
+CONNECTION_TIMEOUT = 180
+
+def encode(ip=None,port=None):
+    result = []
+    if ip:
+        ip = ''.join([struct.pack('!B',int(x)) for x in self.ip.split('.')])
+        result.append(ip)
+    elif port:
+        port = struct.pack('!H',port)
+        result.append(port)
+    elif len(result) == 1:
+        return result[0]
+    else:
+        return result
+
+def decode(ip=None,port=None):
+    result = []
+    if ip:
+        ip = '.'.join([str(x) for x in struct.unpack('!BBBB',ip)])
+        result.append(ip)
+    elif port:
+       port = struct.unpack('!H',port)[0]
+       result.append(ip)
+    elif len(result) == 1:
+        return result[0]
+    else:
+        return result
+
+class TempPeer(Peer):
     def __init__(self,ip,sock,Server):
         self.logger = logging.getLogger('tamchy.Server.TempPeer')
         self.socket = sock
+        self.closed = False
+        self.content_id = None
+        # handshaked will be always False because we need to TempPeer's handle_read
+        # to stop after process_handshake()
+        self.handshaked = False
         self.Server = Server
         self.read_buffer = ''
         self.ip = ip
+        self.port = 'TEMP'
         self.time = time.time()
 
-    def fileno(self):
-        try:
-            s = self.socket.fileno()
-            return s
-        except:
-            return self.handle_close()
-
-    def handle_read(self):
-        message = ''
-        while True:
-            try:
-                m = self.socket.recv(8192)
-                if not m: 
-                    return self.handle_close()
-                message += m
-            except:
-                break
-
-        if not message:
-            return self.handle_close()
-
-        self.read_buffer += message
-        length = self.read_buffer[:4]
-
-        if len(length) < 4:
-            # this is not entire message => wait for remaining part
-            return 
-        length = struct.unpack('!I',length[:4])[0]
-        if length > 32*1024:
-            return self.handle_close()
-        msg = self.read_buffer[4:4 + length]
-        if len(msg) < length:
-            # this is not entire message => wait for remaining part
-            return 
-
-        self.read_buffer = self.read_buffer[4 + length:]
-        #
-        # Start of main logic to handle messages from peer
-        #
+    def process_handshake(self,msg):
         if (msg[:12]).lower() == 'salamatsyzby':
             content_id = msg[12:44]
-            ip = ''.join([struct.pack('!B',int(x)) for x in self.ip.split('.')])
-            port = msg[64:66]
+            #ip = ''.join([struct.pack('!B',int(x)) for x in self.ip.split('.')])
+            #port = msg[44:46]
+            ip = self.ip
+            port = decode(port=msg[44:46])
             if content_id not in self.Server.streams:
                 # try to send message, but we must close the connection anyway -> whether error or not
                 try:
                     self.socket.send(struct.pack('!I',19) + ERROR + pickle.dumps('Invalid Content ID'))
                 except:
                     pass
-                self.logger.debug('Peer (%s) disconnected' % (self.ip))
+                self.logger.debug('Peer (%s) disconnected' % (self))
                 return self.handle_close()
             else:
                 # Everything is good with this peer => we must add this peer to the Container's peers list
-                self.logger.debug('Peer (%s) successfully connected' % (self.ip))
+                self.logger.debug('Peer (%s) successfully connected' % (self))
                 self.Server.accept(self.socket,ip,port,content_id,self.read_buffer,self)
         else:
-            self.logger.debug('Peer (%s) disconnected' % (self.ip))
+            self.logger.debug('Peer (%s) disconnected' % (self))
             return self.handle_close()
-
-    def handle_write(self):
-        pass
 
     def handle_close(self):
         self.socket.close()
-        self.Server.remove(self)
+        self.closed = True
+
+#class TempPeer:
+#    def __init__(self,ip,sock,Server):
+#        self.logger = logging.getLogger('tamchy.Server.TempPeer')
+#        self.socket = sock
+#        self.closed = False
+#        self.content_id = None
+#        self.Server = Server
+#        self.read_buffer = ''
+#        self.ip = ip
+#        self.time = time.time()
+#
+#    def fileno(self):
+#        try:
+#            s = self.socket.fileno()
+#            return s
+#        except:
+#            return self.handle_close()
+#
+#    def handle_read(self):
+#        message = ''
+#        while True:
+#            try:
+#                m = self.socket.recv(8192)
+#                if not m: 
+#                    return self.handle_close()
+#                message += m
+#            except:
+#                break
+#
+#        if not message:
+#            return self.handle_close()
+#
+#        self.time = time.time()
+#
+#        self.read_buffer += message
+#        length = self.read_buffer[:4]
+#
+#        if len(length) < 4:
+#            # this is not entire message => wait for remaining part
+#            return 
+#        length = struct.unpack('!I',length[:4])[0]
+#        if length > 32*1024:
+#            return self.handle_close()
+#        msg = self.read_buffer[4:4 + length]
+#        if len(msg) < length:
+#            # this is not entire message => wait for remaining part
+#            return 
+#
+#        self.read_buffer = self.read_buffer[4 + length:]
+#        #
+#        # Start of main logic to handle messages from peer
+#        #
+#        if (msg[:12]).lower() == 'salamatsyzby':
+#            content_id = msg[12:44]
+#            ip = ''.join([struct.pack('!B',int(x)) for x in self.ip.split('.')])
+#            port = msg[44:46]
+#            if content_id not in self.Server.streams:
+#                # try to send message, but we must close the connection anyway -> whether error or not
+#                try:
+#                    self.socket.send(struct.pack('!I',19) + ERROR + pickle.dumps('Invalid Content ID'))
+#                except:
+#                    pass
+#                self.logger.debug('Peer (%s) disconnected' % (self.ip))
+#                return self.handle_close()
+#            else:
+#                # Everything is good with this peer => we must add this peer to the Container's peers list
+#                self.logger.debug('Peer (%s) successfully connected' % (self.ip))
+#                self.Server.accept(self.socket,ip,port,content_id,self.read_buffer,self)
+#        else:
+#            self.logger.debug('Peer (%s) disconnected' % (self.ip))
+#            return self.handle_close()
+#
+#    @property
+#    def timeout(self):
+#        if time.time() - self.time >= CONNECTION_TIMEOUT:
+#            return True
+#        return False
+#
+#    def handle_write(self):
+#        pass
+#
+#    def handle_close(self):
+#        self.socket.close()
+#        self.closed = True
 
 class Server:
     def __init__(self):
@@ -95,38 +175,43 @@ class Server:
 
     def handle_read(self):
         cl,addr = self.socket.accept()
-        self.logger.debug('Got connection from new peer (' + addr[0] + ')')
+        self.logger.debug('Got connection from new peer (%s)' % (addr[0]))
         if self.C.can_add_peer():
             self.C.prepare_peer(sock=cl)
         else:
             cl.send(self.build_message('\x07',pickle.dumps('Reached Peers Limit')))
             cl.close()
-            self.logger.debug('Rejected connection of new peer (' + addr[0] + ')')
+            self.logger.debug('Rejected connection of new peer (%s)' % (addr[0]))
 
     def build_message(self,id,data=''):
         length = struct.pack('!I',len(id+data))
         return length+id+data
 
     def close(self):
-        self.Reactor.close()
+        #self.Reactor.close()
         self.socket.close()
 
         
 class MultiServer(Server):
-    def __init__(self,port,debug=False):
+    def __init__(self,port,PStorage,debug=False):
         self.logger = logging.getLogger('tamchy.Server')
         # !!! self.socket = sock
-        self.Reactor = Reactor(self)
+        #self.Reactor = Reactor(self)
+        self.PStorage = PStorage
         self.work = True
-        self.raw_ip = 'SERVER'
-        self.raw_port = port
+        self.ip = 'SERVER'
+        self.port = port
+        self.closed = False
+        self.timeout = False
+        self.content_id = 'SERVER'
         if not debug:
             self.socket = self.create_socket(port)
-            self.Reactor.start()
+            #self.Reactor.start()
+        
         # 'content_id':StreamContainer instance
         self.streams = {}
 
-        self.logger.info('Server on port ' + str(port) + ' started')
+        self.logger.info('Server on port %s started' % (port))
 
     def create_socket(self,port):
         sock = socket.socket()
@@ -138,30 +223,30 @@ class MultiServer(Server):
 
     def handle_read(self):
         cl,addr = self.socket.accept()
-        self.logger.debug('Got connection from new peer (' + addr[0] + ')')
+        self.logger.debug('Got connection from new peer (%s)' % (addr[0]))
         peer = TempPeer(addr[0],cl,self)
-        self.Reactor.add(peer)
+        self.PStorage.add(peer)
 
-        # checking for dead TempPeers
-        for peer in self.Reactor.peers:
-            if isinstance(peer,TempPeer):
-                # 300 seconds = 5 minutes
-                if time.time() - peer.time > 300.0:
-                    self.Reactor.remove(peer)
+        ## checking for dead TempPeers
+        #for peer in self.PStorage.get_peers():
+        #    if isinstance(peer,TempPeer):
+        #        # 300 seconds = 5 minutes
+        #        if time.time() - peer.time > 300.0:
+        #            self.PStorage.remove(peer)
 
     def accept(self,sock,ip,port,content_id,buf,peer):
         C = self.streams[content_id]
-        if C.can_add_peer():
-            self.remove(peer)
-            C.prepare_peer(ip=ip,port=port,sock=sock,buf=buf)
+        if self.PStorage.can_add_peer(content_id):
+            self.PStorage.remove(peer)
+            C.prepare_peer(ip,port,sock=sock,buf=buf)
         else:
             peer.handle_close()
 
-    def add(self,peer):
-        self.Reactor.add(peer)
-
-    def remove(self,peer):
-        self.Reactor.remove(peer)
+    #def add(self,peer):
+    #    self.Reactor.add(peer)
+#
+    #def remove(self,peer):
+    #    self.Reactor.remove(peer)
 
     def register_stream(self,container):
         self.streams[container.content_id] = container
@@ -173,6 +258,10 @@ class MultiServer(Server):
             self.logger.debug('Stream Container ({0}) unregistered'.format(container.content_id,))
         except:
             pass
+
+    def close(self):
+        self.closed = True
+        self.socket.close()
 
 
 # Testing
@@ -213,7 +302,7 @@ class C:
         self.content_id = c_id
     def can_add_peer(self):
         return self.can
-    def prepare_peer(self,sock=None,ip=None,port=None,buf=''):
+    def prepare_peer(self,ip,port,sock=None,buf=''):
         self.prepared.append((ip,port))
 
 class PeeR:
@@ -221,6 +310,23 @@ class PeeR:
         self.closed = False
     def handle_close(self):
         self.closed = True
+
+class PStorage:
+    def __init__(self):
+        self.peers = []
+        self.can = True
+
+    def add(self,peer):
+        self.peers.append(peer)
+
+    def can_add_peer(self,content_id):
+        return self.can
+
+    def remove(self,peer):
+        try:
+            self.peers.remove(peer)
+        except:
+            pass
 
 class SeRver:
     def __init__(self):
@@ -233,7 +339,8 @@ class SeRver:
 
 
 def test_server():
-    s = MultiServer(7668,debug=True)
+    ps = PStorage()
+    s = MultiServer(7668,ps,debug=True)
     c1 = C('content_id1')
     c2 = C('content_id2')
     c3 = C('content_id3')
@@ -264,7 +371,7 @@ def test_server():
     assert c4.prepared[0] == ('127.0.0.1',7668)
     p1 = PeeR()
     p2 = PeeR()
-    c2.can = False
+    ps.can = False
     assert len(c2.prepared) == 2
     assert not p.closed
     s.accept(sct,'127.0.0.1',7669,'content_id2','',p1)
