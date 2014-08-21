@@ -11,7 +11,7 @@ from urllib2 import urlopen
 from string import ascii_lowercase as al
 from string import digits
 from random import choice
-from threading import Thread
+import threading
 import cherrypy
 from jinja2 import Environment, FileSystemLoader
 from cherrypy.lib.static import serve_fileobj
@@ -34,6 +34,7 @@ class PeerStorage:
         self.peers = []
         self.MC = max_con
         self.MCBS = max_con_by_stream
+        self.work = True
         self.logger = logging.getLogger('tamchy.PeerStorage')
 
     def get_peers(self,content_id):
@@ -176,10 +177,11 @@ class Client:
         self._streams = {}
         # this dict will hold port:Server instance for this port
         self.ports = {}
+        self.debug = debug
         self.logger.info('Client started')
 
         # getting our external ip
-        self.ip = self.get_ext_ip() if not debug else 'ip'
+        self.ip = self.get_ext_ip()
         self.http = HTTPEngine(self)
         self.PStorage = PeerStorage()
         #self.Reactor = Reactor(self.PStorage)
@@ -194,6 +196,8 @@ class Client:
             self.PStorage.start_serving()
 
     def get_ext_ip(self):
+        if self.debug:
+            return 'ip'
         u = UPNP()
         ip = u.get_external_ip()
         if not ip:
@@ -296,7 +300,9 @@ class Client:
     def close(self):
         for i in self._streams.values():
             i.close()
-        self.stop_http_server()
+        self.http.stop_http_server()
+        self.PStorage.close()
+        self.work = False
         self.logger.info('Client terminated')
 
     def __contains__(self,stream_id):
@@ -398,8 +404,8 @@ class HTTPEngine:
 
     @cherrypy.expose
     def exit(self):
-        self.work = False
-        return 'Goodbye!'
+        self.Client.close()
+        #return 'Goodbye!'
 
     @cherrypy.expose
     def delete(self,id):

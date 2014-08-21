@@ -359,6 +359,7 @@ class StreamContainer:
     def remove_stream(self):
         db = sqlite3.connect('DataBase.db')
         try:
+            # if exists
             db.execute('drop table \"'+self.content_id+'\"')
         except:
             pass
